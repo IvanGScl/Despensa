@@ -2,28 +2,22 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
+import json
 
 st.set_page_config(page_title="Despensa Casa", page_icon="🛒", layout="centered")
 
-# --- CONEXIÓN A GOOGLE SHEETS (BLINDADA) ---
+# --- CONEXIÓN A GOOGLE SHEETS (JSON DIRECTO) ---
 @st.cache_resource
 def get_gspread_client():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
-    # Extraer los secrets como diccionario
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    
-    # Limpiar y reconstruir la clave privada para evitar errores de formato PEM
-    pk = creds_dict.get("private_key", "")
-    pk = pk.replace("\\n", "\n")
-    if "BEGIN PRIVATE KEY" in pk and not pk.startswith("-----BEGIN PRIVATE KEY-----"):
-        # Por si quedó con comillas escapadas o basura al principio
-        pk = "-----BEGIN PRIVATE KEY-----\n" + pk.split("BEGIN PRIVATE KEY-----")[1]
-    if "END PRIVATE KEY" in pk and not pk.endswith("-----END PRIVATE KEY-----\n"):
-        pk = pk.split("END PRIVATE KEY-----")[0] + "END PRIVATE KEY-----\n"
-    
-    creds_dict["private_key"] = pk
-
+    # Cargar el JSON completo desde los secrets
+    secret_value = st.secrets["google_credentials"]
+    if isinstance(secret_value, str):
+        creds_dict = json.loads(secret_value)
+    else:
+        creds_dict = dict(secret_value)
+        
     credentials = Credentials.from_service_account_info(
         creds_dict,
         scopes=scopes
