@@ -1,24 +1,50 @@
 import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
 import pandas as pd
+import json
 
 st.set_page_config(page_title="Despensa Casa", page_icon="🛒", layout="centered")
 
-# --- CONEXIÓN NATIVA A GOOGLE SHEETS ---
+# --- CONEXIÓN DIRECTA A GOOGLE SHEETS ---
+@st.cache_resource
+def get_gspread_client():
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    
+    # Si guardaste el JSON como texto plano en secrets o como diccionario
+    if "google_credentials" in st.secrets:
+        raw_val = st.secrets["google_credentials"]
+        creds_dict = json.loads(raw_val) if isinstance(raw_val, str) else dict(raw_val)
+    elif "gcp_service_account" in st.secrets:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+    else:
+        st.error("No se encontraron credenciales configuradas en los Secrets de Streamlit.")
+        st.stop()
+
+    credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    return gspread.authorize(credentials)
+
 try:
-    # Utiliza la conexión nativa integrada en Streamlit
-    conn = st.connection("gsheets", type="gsheets")
-    # Lee la hoja de cálculo por defecto
-    df = conn.read(spreadsheet="https://docs.google.com/spreadsheets/d/16DC78ghtTbajAxo5PNeQ4AawZrJGqDSwikAQAQSHLjw/edit", ttl=0)
+    gc = get_gspread_client()
+    sheet = gc.open("Base Despensa Casa").sheet1
 except Exception as e:
     st.error(f"Error al conectar con Google Sheets: {e}")
     st.stop()
 
+# --- CARGAR DATOS ---
+def cargar_datos():
+    data = sheet.get_all_records()
+    df_temp = pd.DataFrame(data)
+    if not df_temp.empty and "estado" in df_temp.columns:
+        df_temp["estado"] = df_temp["estado"].astype(str).str.strip().replace({"Agotada": "Agotado", "agotada": "Agotado"})
+    return df_temp
+
+df = cargar_datos()
+
 st.title("🛒 Control de Despensa Casa")
 st.markdown("Lista sincronizada en tiempo real.")
-
-# Normalizar columnas si es necesario
-if not df.empty and "estado" in df.columns:
-    df["estado"] = df["estado"].astype(str).str.strip().replace({"Agotada": "Agotado", "agotada": "Agotado"})
 
 # --- AGREGAR PRODUCTO ---
 with st.expander("➕ Agregar nuevo producto a la lista"):
@@ -30,11 +56,8 @@ with st.expander("➕ Agregar nuevo producto a la lista"):
         
         if submitted and nuevo_nombre:
             nuevo_id = int(df['id'].max() + 1) if not df.empty and 'id' in df.columns and pd.notna(df['id'].max()) else 1
-            nueva_fila = pd.DataFrame([{"id": nuevo_id, "nombre": nuevo_nombre, "categoria": nueva_categoria, "estado": "Agotado", "quien": quien_agrega}])
-            
-            # Agregar al DataFrame y actualizar la hoja completa
-            df_updated = pd.concat([df, nueva_fila], ignore_index=True)
-            conn.update(spreadsheet="https://docs.google.com/spreadsheets/d/16DC78ghtTbajAxo5PNeQ4AawZrJGqDSwikAQAQSHLjw/edit", data=df_updated)
+            nueva_fila = [nuevo_id, nuevo_nombre, nueva_categoria, "Agotado", quien_agrega]
+            sheet.append_row(nueva_fila)
             st.success(f"¡{nuevo_nombre} guardado en Google Sheets!")
             st.rerun()
 
@@ -68,8 +91,8 @@ if not df.empty:
                                         index=idx_actual, 
                                         key=f"status_{prod['id']}", label_visibility="collapsed")
             if nuevo_estado != estado_actual:
-                df.at[index, "estado"] = nuevo_estado
-                conn.update(spreadsheet="https://docs.google.com/spreadsheets/d/16DC78ghtTbajAxo5PNeQ4AawZrJGqDSwikAQAQSHLjw/edit", data=df)
+                cell = sheet.find(str(prod["id"]))
+                sheet.update_cell(cell.row, 4, nuevo_estado)
                 st.rerun()
         st.markdown("---")
 else:
