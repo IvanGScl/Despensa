@@ -5,18 +5,25 @@ import pandas as pd
 
 st.set_page_config(page_title="Despensa Casa", page_icon="🛒", layout="centered")
 
-# --- CONEXIÓN A GOOGLE SHEETS ---
+# --- CONEXIÓN A GOOGLE SHEETS (BLINDADA) ---
 @st.cache_resource
 def get_gspread_client():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
-    # Crear una copia dict de las credenciales
+    # Extraer los secrets como diccionario
     creds_dict = dict(st.secrets["gcp_service_account"])
     
-    # Asegurar que los saltos de línea \n de la private_key estén bien formateados
-    if "private_key" in creds_dict:
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-        
+    # Limpiar y reconstruir la clave privada para evitar errores de formato PEM
+    pk = creds_dict.get("private_key", "")
+    pk = pk.replace("\\n", "\n")
+    if "BEGIN PRIVATE KEY" in pk and not pk.startswith("-----BEGIN PRIVATE KEY-----"):
+        # Por si quedó con comillas escapadas o basura al principio
+        pk = "-----BEGIN PRIVATE KEY-----\n" + pk.split("BEGIN PRIVATE KEY-----")[1]
+    if "END PRIVATE KEY" in pk and not pk.endswith("-----END PRIVATE KEY-----\n"):
+        pk = pk.split("END PRIVATE KEY-----")[0] + "END PRIVATE KEY-----\n"
+    
+    creds_dict["private_key"] = pk
+
     credentials = Credentials.from_service_account_info(
         creds_dict,
         scopes=scopes
