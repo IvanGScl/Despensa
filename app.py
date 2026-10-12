@@ -9,8 +9,16 @@ st.set_page_config(page_title="Despensa Casa", page_icon="🛒", layout="centere
 @st.cache_resource
 def get_gspread_client():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    
+    # Crear una copia dict de las credenciales
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    
+    # Asegurar que los saltos de línea \n de la private_key estén bien formateados
+    if "private_key" in creds_dict:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        
     credentials = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
+        creds_dict,
         scopes=scopes
     )
     return gspread.authorize(credentials)
