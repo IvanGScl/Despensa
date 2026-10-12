@@ -8,7 +8,7 @@ SHEET_ID = "16DC78ghtTbajAxo5PNeQ4AawZrJGqDSwikAQAQSHLjw"
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&id={SHEET_ID}&gid=0"
 
 # PEGA AQUÍ LA URL DE TU WEB APP DE APPS SCRIPT
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzB72A7wgdZ3oZ5SRpzzPX9cyye_a-k5hoynXYmYzTE1gNeHHYsyppFziLo8x8LsE5l/exec""
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzB72A7wgdZ3oZ5SRpzzPX9cyye_a-k5hoynXYmYzTE1gNeHHYsyppFziLo8x8LsE5l/exec"
 
 @st.cache_data(ttl=2)
 def cargar_datos():
