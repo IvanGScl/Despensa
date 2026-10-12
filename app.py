@@ -6,10 +6,9 @@ st.set_page_config(page_title="Despensa Casa", page_icon="🛒", layout="centere
 
 SHEET_ID = "16DC78ghtTbajAxo5PNeQ4AawZrJGqDSwikAQAQSHLjw"
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&id={SHEET_ID}&gid=0"
-
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzB72A7wgdZ3oZ5SRpzzPX9cyye_a-k5hoynXYmYzTE1gNeHHYsyppFziLo8x8LsE5l/exec"
 
-@st.cache_data(ttl=2)
+@st.cache_data(ttl=1)
 def cargar_datos():
     try:
         df_temp = pd.read_csv(CSV_URL)
@@ -46,13 +45,16 @@ with st.expander("➕ Agregar nuevo producto a la lista"):
             }
             
             try:
-                # Usamos allow_redirects=True para seguir la redirección típica de Apps Script
-                response = requests.post(APPS_SCRIPT_URL, json=payload, allow_redirects=True)
-                st.success(f"¡'{nuevo_nombre}' agregado correctamente!")
-                st.cache_data.clear() # Limpia la caché para forzar la lectura del nuevo producto
-                st.rerun()
+                response = requests.post(APPS_SCRIPT_URL, json=payload)
+                resultado = response.json()
+                if resultado.get("result") == "success":
+                    st.success(f"¡'{nuevo_nombre}' agregado a la despensa y guardado en la planilla!")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error(f"Error del servidor: {resultado.get('error', 'Desconocido')}")
             except Exception as e:
-                st.error(f"Error de conexión: {e}")
+                st.error(f"Error al conectar con el backend: {e}")
 
 st.divider()
 
@@ -65,7 +67,7 @@ estado_map = {"🔴 Agotados": "Agotado", "🟡 Por agotarse": "Por agotarse", "
 if not df.empty:
     for index, prod in df.iterrows():
         estado_actual = str(prod["estado"]).strip()
-        if filtro_estado != "Todos" and estado_actual != estado_map[filtro_estado]:
+        if filtro_estado != "Todos" and estado_actual != estado_map.get(filtro_estado, ""):
             continue
         
         badge = "🔴 **AGOTADO**" if estado_actual == "Agotado" else ("🟡 **POR AGOTARSE**" if estado_actual == "Por agotarse" else "🟢 **DISPONIBLE**")
@@ -89,9 +91,13 @@ if not df.empty:
                     "id": int(prod["id"]),
                     "estado": nuevo_estado
                 }
-                requests.post(APPS_SCRIPT_URL, json=payload, allow_redirects=True)
-                st.cache_data.clear()
-                st.rerun()
+                try:
+                    res = requests.post(APPS_SCRIPT_URL, json=payload).json()
+                    if res.get("result") == "success":
+                        st.cache_data.clear()
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"No se pudo actualizar: {e}")
         st.markdown("---")
 else:
     st.info("No hay productos registrados aún en la despensa.")
