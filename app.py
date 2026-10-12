@@ -1,47 +1,68 @@
 import streamlit as st
-import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+import pandas as pd
+import json
 
 st.set_page_config(page_title="Despensa Casa", page_icon="🛒", layout="centered")
 
-SHEET_NAME = "Base Despensa Casa"
-
-# --- CONEXIÓN PÚBLICA / SIN CLAVES COMPLEJAS ---
+# --- CONEXIÓN ROBUSTA A GOOGLE SHEETS ---
 @st.cache_resource
-def conectar_hoja():
-    # Si no hay secretos configurados, intentamos conectar mediante gspread público o por CSV directo
-    gc = gspread.service_account_from_dict({}) # fallback si fuera necesario
-    # O mejor aún, usando un cliente público de gspread con la hoja compartida
-    import gspread
-    gc = gspread.anonymous()
-    return gc.open(SHEET_NAME).sheet1
+def get_gspread_client():
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    
+    # Leer de forma segura los secrets soportando texto plano JSON o diccionario TOML
+    if "google_credentials" in st.secrets:
+        raw = st.secrets["google_credentials"]
+        creds_dict = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    elif "gcp_service_account" in st.secrets:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        if "private_key" in creds_dict:
+            # Corregir los saltos de línea literales de forma segura
+            creds_dict["private_key"] = str(creds_dict["private_key"]).replace("\\n", "\n")
+    else:
+        st.error("Faltan las credenciales en los Secrets de Streamlit.")
+        st.stop()
 
-# Como Google Sheets privado requiere autorización, usaremos la URL de exportación CSV para leer 
-# y un método ultra sencillo con gspread si la hoja es pública para cualquier editor.
-SHEET_ID = "16DC78ghtTbajAxo5PNeQ4AawZrJGqDSwikAQAQSHLjw"
-CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&id={SHEET_ID}&gid=0"
+    credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    return gspread.authorize(credentials)
 
-@st.cache_data(ttl=2)
+try:
+    gc = get_gspread_client()
+    sheet = gc.open("Base Despensa Casa").sheet1
+except Exception as e:
+    st.error(f"Error al conectar con Google Sheets: {e}")
+    st.stop()
+
+# --- CARGAR DATOS ---
 def cargar_datos():
-    try:
-        df_temp = pd.read_csv(CSV_URL)
-        df_temp.columns = df_temp.columns.str.strip().str.lower()
-        if not df_temp.empty and "estado" in df_temp.columns:
-            df_temp["estado"] = df_temp["estado"].astype(str).str.strip().replace({"Agotada": "Agotado", "agotada": "Agotado"})
-        return df_temp
-    except Exception as e:
-        st.error(f"Error al leer la hoja: {e}")
-        return pd.DataFrame()
+    data = sheet.get_all_records()
+    df_temp = pd.DataFrame(data)
+    if not df_temp.empty and "estado" in df_temp.columns:
+        df_temp["estado"] = df_temp["estado"].astype(str).str.strip().replace({"Agotada": "Agotado", "agotada": "Agotado"})
+    return df_temp
 
 df = cargar_datos()
 
 st.title("🛒 Control de Despensa Casa")
-st.markdown("Lista sincronizada en tiempo real (Modo sin claves).")
+st.markdown("Lista sincronizada en tiempo real desde la aplicación.")
 
-# --- AVISO DE USO ---
-st.info("💡 **Modo sin llaves activo:** Para guardar cambios automáticamente de forma instantánea sin errores de servidor, puedes editar directamente tu planilla en el siguiente enlace y la App se actualizará sola al instante:")
-st.markdown(f"👉 [Hacer clic aquí para abrir tu Google Sheet y editarla con comodidad](https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit)")
+# --- AGREGAR PRODUCTO (100% AUTOMÁTICO) ---
+with st.expander("➕ Agregar nuevo producto a la lista"):
+    with st.form("form_agregar", clear_on_submit=True):
+        nuevo_nombre = st.text_input("Nombre del producto")
+        nueva_categoria = st.selectbox("Categoría", ["Abarrotes", "Lácteos", "Licores", "Limpieza", "Frutas y Verduras", "Otros"])
+        quien_agrega = st.text_input("¿Quién lo anota?", value="Iván")
+        submitted = st.form_submit_button("Añadir a la Despensa")
+        
+        if submitted and nuevo_nombre:
+            nuevo_id = int(df['id'].max() + 1) if not df.empty and 'id' in df.columns and pd.notna(df['id'].max()) else 1
+            nueva_fila = [nuevo_id, nuevo_nombre, nueva_categoria, "Agotado", quien_agrega]
+            
+            # Escritura directa en Google Sheets
+            sheet.append_row(nueva_fila)
+            st.success(f"¡'{nuevo_nombre}' agregado con éxito!")
+            st.rerun()
 
 st.divider()
 
@@ -49,22 +70,35 @@ st.divider()
 filtro_estado = st.radio("Filtrar por estado:", ["Todos", "🔴 Agotados", "🟡 Por agotarse", "🟢 Disponibles"], horizontal=True)
 
 st.subheader("📋 Estado actual de la despensa")
-estado_map = {"🔴 Agotados": "Agotado", "🟡 Por agotarse": "Por agotarse", "🟢 Disponibles": "Disponible"}
 
 if not df.empty:
     for index, prod in df.iterrows():
         estado_actual = str(prod["estado"]).strip()
-        if filtro_estado != "Todos" and estado_actual != estado_map[filtro_estado]:
+        
+        # Mapeo de filtros
+        estado_map = {"🔴 Agotados": "Agotado", "🟡 Por agotarse": "Por agotarse", "🟢 Disponibles": "Disponible"}
+        if filtro_estado != "Todos" and estado_actual != estado_map.get(filtro_estado, ""):
             continue
         
         badge = "🔴 **AGOTADO**" if estado_actual == "Agotado" else ("🟡 **POR AGOTARSE**" if estado_actual == "Por agotarse" else "🟢 **DISPONIBLE**")
             
-        col1, col2 = st.columns([3, 2])
+        col1, col2, col3 = st.columns([3, 2, 2])
         with col1:
             st.write(f"**{prod['nombre']}**")
             st.caption(f"Categoría: {prod['categoria']} | Por: {prod['quien']}")
         with col2:
             st.write(badge)
+        with col3:
+            opciones_estado = ["Disponible", "Por agotarse", "Agotado"]
+            idx_actual = opciones_estado.index(estado_actual) if estado_actual in opciones_estado else 2
+            
+            nuevo_estado = st.selectbox("Cambiar", opciones_estado, 
+                                        index=idx_actual, 
+                                        key=f"status_{prod['id']}", label_visibility="collapsed")
+            if nuevo_estado != estado_actual:
+                cell = sheet.find(str(prod["id"]))
+                sheet.update_cell(cell.row, 4, nuevo_estado)
+                st.rerun()
         st.markdown("---")
 else:
     st.info("No hay productos registrados aún en la despensa.")
