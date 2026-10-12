@@ -19,13 +19,16 @@ try:
     gc = get_gspread_client()
     sheet = gc.open("Base Despensa Casa").sheet1
 except Exception as e:
-    st.error("Error al conectar con Google Sheets. Revisa las credenciales en Secrets y los permisos del archivo.")
+    st.error(f"Error al conectar con Google Sheets: {e}")
     st.stop()
 
 # --- CARGAR DATOS ---
 def cargar_datos():
     data = sheet.get_all_records()
-    return pd.DataFrame(data)
+    df_temp = pd.DataFrame(data)
+    if not df_temp.empty and "estado" in df_temp.columns:
+        df_temp["estado"] = df_temp["estado"].astype(str).str.strip().replace({"Agotada": "Agotado", "agotada": "Agotado"})
+    return df_temp
 
 df = cargar_datos()
 
@@ -36,8 +39,8 @@ st.markdown("Lista sincronizada en tiempo real.")
 with st.expander("➕ Agregar nuevo producto a la lista"):
     with st.form("form_agregar"):
         nuevo_nombre = st.text_input("Nombre del producto")
-        nueva_categoria = st.selectbox("Categoría", ["Abarrotes", "Lácteos", "Limpieza", "Frutas y Verduras", "Otros"])
-        quien_agrega = st.text_input("¿Quién lo anota?", value="Integrante")
+        nueva_categoria = st.selectbox("Categoría", ["Abarrotes", "Lácteos", "Licores", "Limpieza", "Frutas y Verduras", "Otros"])
+        quien_agrega = st.text_input("¿Quién lo anota?", value="Iván")
         submitted = st.form_submit_button("Añadir")
         
         if submitted and nuevo_nombre:
@@ -57,10 +60,11 @@ estado_map = {"🔴 Agotados": "Agotado", "🟡 Por agotarse": "Por agotarse", "
 
 if not df.empty:
     for index, prod in df.iterrows():
-        if filtro_estado != "Todos" and prod["estado"] != estado_map[filtro_estado]:
+        estado_actual = str(prod["estado"]).strip()
+        if filtro_estado != "Todos" and estado_actual != estado_map[filtro_estado]:
             continue
         
-        badge = "🔴 **AGOTADO**" if prod["estado"] == "Agotado" else ("🟡 **POR AGOTARSE**" if prod["estado"] == "Por agotarse" else "🟢 **DISPONIBLE**")
+        badge = "🔴 **AGOTADO**" if estado_actual == "Agotado" else ("🟡 **POR AGOTARSE**" if estado_actual == "Por agotarse" else "🟢 **DISPONIBLE**")
             
         col1, col2, col3 = st.columns([3, 2, 2])
         with col1:
@@ -70,12 +74,12 @@ if not df.empty:
             st.write(badge)
         with col3:
             opciones_estado = ["Disponible", "Por agotarse", "Agotado"]
-            idx_actual = opciones_estado.index(prod["estado"]) if prod["estado"] in opciones_estado else 0
+            idx_actual = opciones_estado.index(estado_actual) if estado_actual in opciones_estado else 2
             
             nuevo_estado = st.selectbox("Cambiar", opciones_estado, 
                                         index=idx_actual, 
                                         key=f"status_{prod['id']}", label_visibility="collapsed")
-            if nuevo_estado != prod["estado"]:
+            if nuevo_estado != estado_actual:
                 cell = sheet.find(str(prod["id"]))
                 sheet.update_cell(cell.row, 4, nuevo_estado)
                 st.rerun()
