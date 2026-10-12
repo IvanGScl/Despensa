@@ -7,7 +7,6 @@ st.set_page_config(page_title="Despensa Casa", page_icon="🛒", layout="centere
 SHEET_ID = "16DC78ghtTbajAxo5PNeQ4AawZrJGqDSwikAQAQSHLjw"
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&id={SHEET_ID}&gid=0"
 
-# PEGA AQUÍ LA URL DE TU WEB APP DE APPS SCRIPT
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzB72A7wgdZ3oZ5SRpzzPX9cyye_a-k5hoynXYmYzTE1gNeHHYsyppFziLo8x8LsE5l/exec"
 
 @st.cache_data(ttl=2)
@@ -25,9 +24,8 @@ def cargar_datos():
 df = cargar_datos()
 
 st.title("🛒 Control de Despensa Casa")
-st.markdown("Lista sincronizada en tiempo real (Sin claves ni secretos).")
 
-# --- AGREGAR PRODUCTO (AUTOMÁTICO VÍA WEB APP) ---
+# --- AGREGAR PRODUCTO ---
 with st.expander("➕ Agregar nuevo producto a la lista"):
     with st.form("form_agregar", clear_on_submit=True):
         nuevo_nombre = st.text_input("Nombre del producto")
@@ -48,12 +46,11 @@ with st.expander("➕ Agregar nuevo producto a la lista"):
             }
             
             try:
-                response = requests.post(APPS_SCRIPT_URL, json=payload)
-                if response.status_code == 200:
-                    st.success(f"¡'{nuevo_nombre}' agregado correctamente!")
-                    st.rerun()
-                else:
-                    st.error("Error al comunicarse con la hoja.")
+                # Usamos allow_redirects=True para seguir la redirección típica de Apps Script
+                response = requests.post(APPS_SCRIPT_URL, json=payload, allow_redirects=True)
+                st.success(f"¡'{nuevo_nombre}' agregado correctamente!")
+                st.cache_data.clear() # Limpia la caché para forzar la lectura del nuevo producto
+                st.rerun()
             except Exception as e:
                 st.error(f"Error de conexión: {e}")
 
@@ -92,7 +89,8 @@ if not df.empty:
                     "id": int(prod["id"]),
                     "estado": nuevo_estado
                 }
-                requests.post(APPS_SCRIPT_URL, json=payload)
+                requests.post(APPS_SCRIPT_URL, json=payload, allow_redirects=True)
+                st.cache_data.clear()
                 st.rerun()
         st.markdown("---")
 else:
